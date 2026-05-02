@@ -1,0 +1,184 @@
+# E-NeRF Configuration per RTX 4060 Ti
+# Creato: Aprile 2026
+
+# ─────────────────────────────────────────────────────
+# 🎯 DATASET E PATHS
+# ─────────────────────────────────────────────────────
+
+name = "enerf_rtx4060ti"
+expname = enerf_rtx4060ti
+
+# Formato dataset (esim, tumvie, eds)
+mode = eds
+
+# Cartella dataset (MODIFICA QUESTO!)
+# Per Windows: usa backslash o forward slash
+# Es: "C:\\Users\\billi\\Desktop\\enerf\\data\\mocapDesk2"
+#     oppure: "C:/Users/billi/Desktop/enerf/data/mocapDesk2"
+datadir = "./data/mocapDesk2"
+
+# Scala immagini (1=nessuna, 2=dimezza risoluzione)
+# downscale=2: 512x512 → 256x256 (4x speedup)
+downscale = 2
+
+# ─────────────────────────────────────────────────────
+# 🧠 ARCHITETTURA MODELLO
+# ─────────────────────────────────────────────────────
+
+# Usa FFMLP (Fast Fully-Fused MLP in CUDA) [CONSIGLIATO]
+ff = 1
+
+# Usa Tiny CUDA Neural Networks [non consigliato per RTX 4060 Ti]
+tcnn = 0
+
+# ─────────────────────────────────────────────────────
+# 💾 MEMORIA (CRITICO PER RTX 4060 Ti!)
+# ─────────────────────────────────────────────────────
+
+# Mixed precision training (float16 per attivazioni, float32 per gradienti)
+# ✅ OBBLIGATORIO: riduce memoria del 50%
+fp16 = 1
+
+# Gradient checkpointing
+# ✅ OBBLIGATORIO: non salva attivazioni intermedie, riduce memoria del 50%
+ckpt = 1
+
+# ─────────────────────────────────────────────────────
+# 📸 SAMPLING (RIDOTTO PER GPU LIMITATA)
+# ─────────────────────────────────────────────────────
+
+# Numero raggi per iterazione di training
+# Default full: 65536 (512×512 pixels)
+# RTX 4060 Ti: 3072 (5% di full, ~36×36 pixels)
+# Tradeoff: meno raggi = più iterazioni necessarie, ma memoria stabile
+num_rays = 3072
+
+# Numero sample per raggio (coarse pass)
+# Default full: 128
+# RTX 4060 Ti: 24
+# Meno sample = volumi rendering meno preciso, ma training possibile
+num_steps = 24
+
+# Numero sample per raggio (fine pass, dopo upsample)
+# Default full: 128
+# RTX 4060 Ti: 24
+upsample_steps = 24
+
+# ─────────────────────────────────────────────────────
+# 🎓 TRAINING HYPERPARAMETERS
+# ─────────────────────────────────────────────────────
+
+# Learning rate
+lr = 1e-2
+
+# Numero total iterazioni (passi discesa gradiente)
+# ~1 step = 0.5 sec on RTX 4060 Ti
+# 10000 step = ~2 ore
+iters = 10000
+
+# Batch size per rendering
+# Solitamente 1 frame per GPU
+batch_size = 1
+
+# ─────────────────────────────────────────────────────
+# 📡 EVENT CAMERA (E-NeRF specific)
+# ─────────────────────────────────────────────────────
+
+# Usa evento camera per training
+events = 1
+
+# Usa SOLO evento (no frame RGB + depth)
+event_only = 0
+
+# Soglia conteggio evento per loss
+# -1 = loss normalizzato (consigliato)
+# > 0 = soglia assoluta
+C_thres = -1
+
+# Accumula più batch eventi per update
+accumulate_evs = 1
+
+# ─────────────────────────────────────────────────────
+# 📊 VALIDAZIONE E TESTING
+# ─────────────────────────────────────────────────────
+
+# Valida modello ogni N iterazioni
+eval_cnt = 500
+
+# Salva checkpoint ogni N iterazioni
+save_interval = 500
+
+# Test dopo training
+do_test = 1
+
+# ─────────────────────────────────────────────────────
+# 🎨 RENDERING E SCENE
+# ─────────────────────────────────────────────────────
+
+# Scala densità (>1: rende più denso, < 1: più trasparente)
+# Aumenta se hai buchi, diminuisci se troppo opaco
+density_scale = 1
+
+# Raggio sfondo (< 0: no background)
+bg_radius = -1
+
+# Bound scena (scena assunta in [-bound, bound]³)
+bound = 1.0
+
+# Min near plane distance
+min_near = 0.2
+
+# Density threshold per accumulazione alpha
+density_thresh = 0.01
+
+# ─────────────────────────────────────────────────────
+# ⚙️ GPU E CUDA
+# ─────────────────────────────────────────────────────
+
+# Usa cuda_ray acceleration (disabilita per stabilità su GPU pequeña)
+cuda_ray = 0
+
+# GPU ID da usare (0 se una sola GPU)
+gpu = 0
+
+# ─────────────────────────────────────────────────────
+# 🔄 DATASET SPLIT
+# ─────────────────────────────────────────────────────
+
+# Opzionale: specifica indici frame per train/val/test
+# Commentare per usare default da main_nerf.py
+
+# train_idxs = "range(0, 965)"
+# val_idxs = "13091, 3156, 3252"  
+# test_idxs = "0"
+
+# ─────────────────────────────────────────────────────
+# 🌱 REPRODUCIBILITY
+# ─────────────────────────────────────────────────────
+
+# Random seed per reproducibilità
+seed = 42
+
+# ─────────────────────────────────────────────────────
+# 💡 TIPS PER RTX 4060 Ti
+# ─────────────────────────────────────────────────────
+
+# Se OOM durante training:
+#   1) Riduci num_rays: 3072 → 1536
+#   2) Riduci num_steps: 24 → 16
+#   3) Aumenta downscale: 2 → 3
+
+# Se convergenza lenta (PSNR < 20 dB):
+#   1) Aumenta learning rate: 1e-2 → 5e-2
+#   2) Riduci eval_cnt: 500 → 1000
+#   3) Disabilita event_only se non essenziale
+
+# Se GPU throttle (temp > 80°C):
+#   1) Riduci num_rays ulteriormente
+#   2) Aumenta delay tra step (modifica main_nerf.py)
+#   3) Migliora ventilazione case/laptop
+
+# Se inferenza lenta:
+#   Abilita ff=1 (FFMLP)
+#   Riduci downscale durante inference (non nel config, in script)
+#   Prova profile_inference_ff.py per timing breakdown
