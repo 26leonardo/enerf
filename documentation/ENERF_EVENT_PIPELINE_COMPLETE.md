@@ -399,80 +399,98 @@ for epoch in range(max_epoch):
 
 **Dettaglio model.forward() - File: `nerf/network_ff.py`**
 
-```python
-def forward(self, rays_o, rays_d, near=0.2, far=1.0, **kwargs):
-    # rays_o: [n_rays, 3] camera origins
-    # rays_d: [n_rays, 3] ray directions
-    
-    # Rendering pipeline per ray
-    # ├─ Per ogni ray_i in n_rays:
-    # │
-    # ├─ MARCHING: Cammina solo lungo ray (z va da near a far)
-    # │  └─ Campiona 24 z-valori (num_steps=24, coarse)
-    
-    if self.cuda_ray:
-        # Usa CUDA raymarching (veloce, ma disabilitato per stabilità)
-        outputs = self.render_cuda(rays_o, rays_d, ...)
-    else:
-        # Usa PyTorch raymarching
-        outputs = self.render(rays_o, rays_d, staged=False, ...)
-        
-    return outputs
+Il metodo `forward` in `network_ff.py` è per un singolo punto 3D, non per rays. Per E-NeRF, il rendering è gestito dalla classe base `NeRFRenderer` che chiama `render()` → `run()`.
 
-def render(self, rays_o, rays_d, staged=False, **kwargs):
-    # Dettaglio per singolo ray
-    # ────────────────────────────────────────
+```python
+# network_ff.py forward (per singolo punto)
+def forward(self, x, d):
+    # x: [B, 3] posizioni 3D
+    # d: [B, 3] direzioni
     
-    # Step 1: Query density via encoder + sigma_net lungo ray
-    for step in range(num_steps):
-        # Sample point lungo ray
-        z = linspace(near, far, num_steps)    # [24]
-        points = rays_o + z * rays_d           # [24, 3]
-        
-        # Encoding: Hash grid per densità
-        density_feat = self.encoder(points)     # [24, 256]
-        
-        # Density MLP (sigma_net)
-        sigma = self.sigma_net(density_feat)   # [24, 1]
-        
-        # Alpha compositing per density
-        # ├─ alpha = 1 - exp(-sigma * delta_z)
-        # └─ weights = α * exp(-sum_prev_alpha)
-        
-        weights = compute_weights(sigma)        # [24]
+    # Sigma network
+    x_enc = self.encoder(x, bound=self.bound)  # [B, 256]
+    h = self.sigma_net(x_enc)                  # [B, 16] (1 sigma + 15 geo_feat)
+    sigma = trunc_exp(h[..., 0])               # [B]
+    geo_feat = h[..., 1:]                      # [B, 15]
     
-    # Step 2: Query colore via encoder + color_net
-    # (SOLO per sample con weight > threshold)
-    for step in (where weights > threshold):
-        z = sampled_z[step]
-        points = rays_o + z * rays_d           # [1, 3]
-        
-        # Feature + view direction
-        feat = self.encoder(points)             # [1, 256]
-        
-        # View direction conditioning
-        # ├─ d = ray direction (unit vector)
-        # ├─ Aggiungi al feature
-        # └─ color_net input: [feat, d] = [259]
-        
-        color = self.color_net(feat, rays_d)   # [1, 1] (LUMA! not RGB)
-        
-        # Compositing
-        # ├─ rgb_out += weights[step] * color
-        # └─ depth_out += weights[step] * z
-                
-    # Step 3: Upsampling (hierarchical sampling)
-    # ├─ Calcola PDF dai weights coarse
-    # ├─ Ricampiona (upsample_steps=24 fine samples)
-    # └─ Ripeti Step 1-2 su questi sample
+    # Color network (luma prediction)
+    d_enc = self.encoder_dir(d)                # [B, 27] (spherical harmonics)
+    p = torch.zeros_like(geo_feat[..., :1])    # padding per raggiungere 32 input
+    h = torch.cat([d_enc, geo_feat, p], dim=-1) # [B, 27+15+1=43] → padded a 32?
+    h = self.color_net(h)                      # [B, 1] luma ∈ [0,1]
+    rgb = torch.sigmoid(h)                     # [B, 1]
     
-    # Ritorna
-    return {
-        'image': rgb_out,          # [n_rays] (luma combinato)
-        'depth': depth_out,         # [n_rays]
-        'weights': weights          # [n_rays]
-    }
+    return sigma, rgb
 ```
+
+**Pipeline di rendering per E-NeRF (event-only, no RGB)**
+
+La pipeline completa è in `NeRFRenderer.run()` (file `nerf/renderer.py`):
+
+```python
+def run(self, rays_o, rays_d, num_steps=128, upsample_steps=128, **kwargs):
+    # rays_o/d: [N, 3] (N = batch_size * num_rays)
+    
+    # 1. Calcola near/far per ogni ray
+    nears, fars = raymarching.near_far_from_aabb(rays_o, rays_d, aabb, min_near)
+    
+    # 2. Campiona z_vals lungo ogni ray (coarse sampling)
+    z_vals = torch.linspace(0, 1, num_steps).expand(N, num_steps)
+    z_vals = nears + (fars - nears) * z_vals  # [N, num_steps]
+    
+    # 3. Genera punti 3D lungo rays
+    xyzs = rays_o.unsqueeze(-2) + rays_d.unsqueeze(-2) * z_vals.unsqueeze(-1)  # [N, num_steps, 3]
+    
+    # 4. Query density per tutti i punti
+    density_out = self.density(xyzs.reshape(-1, 3))  # chiama network_ff.density()
+    sigmas = density_out['sigma'].view(N, num_steps)  # [N, num_steps]
+    geo_feat = density_out['geo_feat'].view(N, num_steps, -1)  # [N, num_steps, 15]
+    
+    # 5. Calcola weights (alpha compositing)
+    deltas = z_vals[..., 1:] - z_vals[..., :-1]  # [N, num_steps-1]
+    alphas = 1 - torch.exp(-deltas * density_scale * sigmas[..., :-1])
+    weights = alphas * torch.cumprod(1 - alphas + 1e-15, dim=-1)  # [N, num_steps]
+    
+    # 6. Hierarchical upsampling (se upsample_steps > 0)
+    if upsample_steps > 0:
+        # Campiona nuovi punti basati su PDF dei weights
+        new_z_vals = sample_pdf(z_vals_mid, weights[:, 1:-1], upsample_steps)
+        new_xyzs = rays_o.unsqueeze(-2) + rays_d.unsqueeze(-2) * new_z_vals.unsqueeze(-1)
+        
+        # Query density per nuovi punti
+        new_density_out = self.density(new_xyzs.reshape(-1, 3))
+        # Concatena e riordina tutti i punti
+        z_vals = torch.cat([z_vals, new_z_vals], dim=1).sort(dim=1)[0]
+        # ... (riordina xyzs, sigmas, geo_feat)
+    
+    # 7. Query colore SOLO per punti con weight > threshold
+    mask = weights > 1e-4  # [N, total_steps]
+    dirs = rays_d.unsqueeze(-2).expand_as(xyzs)  # [N, total_steps, 3]
+    
+    # Chiama network_ff.color() per punti validi
+    rgbs = self.color(
+        xyzs.reshape(-1, 3), 
+        dirs.reshape(-1, 3), 
+        mask=mask.reshape(-1), 
+        geo_feat=geo_feat.reshape(-1, geo_feat.shape[-1])
+    )  # [N*total_steps, 1] luma predicted
+    
+    rgbs = rgbs.view(N, -1, 1)  # [N, total_steps, 1]
+    
+    # 8. Alpha compositing finale
+    weights_sum = weights.sum(dim=-1)  # [N]
+    image = torch.sum(weights.unsqueeze(-1) * rgbs, dim=-2)  # [N, 1] luma finale
+    
+    # 9. Calcola depth
+    depth = torch.sum(weights * z_vals, dim=-1) / weights_sum  # [N]
+    
+    return {'image': image, 'depth': depth}  # image = predicted luma [0,1]
+```
+
+**Loss per E-NeRF event-only**:
+- `pred = model(rays_o, rays_d)['image']` → `[N, 1]` luma ∈ [0,1]
+- `target = (polarity + 1) / 2` → `[N, 1]` ∈ {0, 1} (ON=1, OFF=0)
+- `loss = MSE(pred, target)` o `BCE(pred, target)`
 
 **memoria durante forward**:
 - features [n_rays, 256]: 2048 × 256 × 4 bytes = 2.1 MB

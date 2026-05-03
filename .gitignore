@@ -3,6 +3,8 @@ build/
 *.egg-info/
 *.so
 
+TUMVIEDATA/
+
 tmp*
 data/
 trial*/

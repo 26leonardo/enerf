@@ -145,59 +145,43 @@ python -c "from gridencoder import GridEncoder"
 
 ### 2.1 Dataset Disponibili
 
-E-NeRF supporta 3 dataset:
+E-NeRF supporta:
 
 | Dataset | Fonte | Dimensione | Link |
 |---------|-------|-----------|------|
-| **ESIM** (simulated) | E-NeRF paper | ~500 MB | [https://vision.in.tum.de/research/enerf](https://vision.in.tum.de/research/enerf) |
-| **TUM-VIE** | TUM dataset | ~2 GB | [https://vision.in.tum.de/data/datasets/visual-inertial-event-dataset](https://vision.in.tum.de/data/datasets/visual-inertial-event-dataset) |
-| **EDS** | Event-based dataset | ~1 GB | [https://rpg.ifi.uzh.ch/eds.html](https://rpg.ifi.uzh.ch/eds.html) |
+| **TUM-VIE** | TUM dataset | ~2 GB | [https://cvg.cit.tum.de/data/datasets/visual-inertial-event-dataset](https://vision.in.tum.de/data/datasets/visual-inertial-event-dataset) |
 
-**Per principianti**: scarica un dataset ESIM piccolo (~mocapDesk2, ~200 MB)
+**Per principianti**: scarica un dataset ESIM piccolo (~mocapDesk2)
 
 ### 2.2 Download Dataset ESIM (Consigliato)
+Cosa scaricare  
+Per event-only ti servono due dei tre file:  
+`events-left` → sì — contiene events_left.h5, gli eventi della camera sinistra (camId=0), l'unica usata da E-NeRF.  
+`events-right` → no — non serve per event-only. La camera destra è usata solo per algoritmi stereo (SLAM, EMVS). Risparmia 1.3 GB.  
+`vi-gt-data` → sì, obbligatorio — anche in event-only. Contiene le pose MoCap (120 Hz), i frame grayscale (20 Hz, usati come validation view), e i dati IMU. Senza questo file non hai le pose per generare i raggi.  
+In più devi scaricare manualmente due file di calibrazione dalla pagina del dataset (non sono nel tar):  
 
-```powershell
-# Crea directory dati
-mkdir C:\path\to\enerf\data
-cd C:\path\to\enerf\data
-
-# Scarica da TUM (usando powershell o browser)
-# Browser: https://vision.in.tum.de/research/enerf
-#          → download "mocapDesk2" (piccolo)
-
-# Oppure via PowerShell
-$url = "https://vision.in.tum.de/research/enerf/mocapDesk2.tar"
-$output = "mocapDesk2.tar"
-
-Invoke-WebRequest -Uri $url -OutFile $output
-
-# Extract (usa 7-Zip o WinRAR, oppure WSL)
-# Oppure PowerShell (se hai 7-Zip):
-& "C:\Program Files\7-Zip\7z.exe" x mocapDesk2.tar
-
-# Risultato: cartella mocapDesk2/ con:
-#   ├── images/
-#   ├── events/
-#   ├── poses_bounds.npy
-#   └── intrinsics.txt
-```
+`camera-calibrationA.json` (valido per mocap-desk2)  
+`mocap-imu-calibrationA.json` 
 
 ### 2.3 Struttura Dati Attesa
 
 ```
-data/
-├── mocapDesk2/
-│   ├── poses_bounds.npy      ← Pose camera (formato LLFF)
-│   ├── intrinsics.txt        ← Parametri camera
-│   ├── images/               ← Frame video
-│   │   ├── 0000.png
-│   │   ├── 0001.png
+TUMVIEDATA/                          ← questa è la tua root, passala a --path
+│
+├── events_left.h5                   ← estratto da events-left (1.4GB)
+│
+├── vi_gt_data/                      ← estratto da vi-gt-data (.tar)
+│   ├── mocap_data.txt               ← pose MoCap @ 120Hz (x,y,z + quaternione)
+│   ├── imu.txt                      ← misure IMU @ 200Hz
+│   ├── images_left/                 ← frame grayscale @ 20Hz (validation views)
+│   │   ├── 000000.png
+│   │   ├── 000001.png
 │   │   └── ...
-│   └── events/               ← Evento camera
-│       ├── 0.npy            ← [x, y, t, p] arrays
-│       ├── 1.npy
-│       └── ...
+│   └── images_right/                ← non usato in event-only, puoi ignorarlo
+│
+├── calibration.json                 ← rinominato da camera-calibrationA.json (!)
+└── mocap-imu-calib.json             ← rinominato da mocap-imu-calibrationA.json (!)
 ```
 
 ### 2.4 Verifica Dati e Preprocessing (se necessario)
