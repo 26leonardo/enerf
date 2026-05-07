@@ -192,14 +192,18 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     if opt.test:
-        trainer = Trainer(opt.expname, opt, model, device=device, criterion=criterion, fp16=opt.fp16, metrics=[PSNRMeter(opt, select_frames)], use_checkpoint=opt.ckpt)
+        trainer = Trainer(opt.expname, opt, model, device=device, 
+                          criterion=criterion, fp16=opt.fp16, 
+                          metrics=[PSNRMeter(opt, select_frames)], 
+                          use_checkpoint=opt.ckpt)
 
         if opt.gui:
             gui = NeRFGUI(opt, trainer)
             gui.render()
         
         else:
-            test_loader = NeRFDataset(opt, device=device, type='test', select_frames=select_frames).dataloader()
+            test_loader = NeRFDataset(opt, device=device, type='test', 
+                                      select_frames=select_frames).dataloader()
             if opt.mode == 'blender':
                 trainer.evaluate(test_loader)
             else:

@@ -5,11 +5,15 @@ expname = modesk2_enerf
 mode = tumvie
 pp_poses_sphere = 0
 
+acc_max_num_evs = ALL
+
 bound = 2
 "assume the scene is bounded in box[-bound, bound]^3, if > 1, will invoke adaptive ray marching."
 
 scale = 0.5
 scale adjusts the camera locaction to make sure it falls inside the above bounding box.
+downscale = 1
+"scale camera location into box[-bound, bound]^3"
 
 bg_radius = -1
 
@@ -18,7 +22,7 @@ disable_view_direction = 0
 radius = 5
 
 e2vid = 0
-"select upsample factor with this value"
+"select upsample factor with this value" = --e2vid 4 (Upsampling Temporale) Qui dici al sistema: "Per ogni intervallo tra due foto, inventa 4 fotogrammi intermedi"
 
 events = 1
 event_only = 1

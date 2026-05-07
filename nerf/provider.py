@@ -966,6 +966,7 @@ class NGPDataset(Dataset):
     def load_kfs_data(self, frames):
         self.poses = []
         self.images = []
+        # needed to find the real frames ("images bound") to use, for after generating/upsampling frames in that period (according to e2vid value)
         if self.e2vid:
             self.e2vid_gts = []
 
@@ -997,7 +998,9 @@ class NGPDataset(Dataset):
             if not os.path.exists(f_path):
                 continue
             
+            # pose = array NumPy float32 [4x4] (f is dictionary of the frames)
             pose = np.array(f['transform_matrix'], dtype=np.float32) # [4, 4]
+            # trsform the data from OpenGL to OpenCV and 
             pose = nerf_matrix_to_ngp(pose, scale=self.scale)
 
             image = cv2.imread(f_path, cv2.IMREAD_UNCHANGED) # [H, W, 3] o [H, W, 4]
@@ -1099,7 +1102,9 @@ class NeRFDataset(NGPDataset):
         size = len(self.poses)
         if self.training and self.rand_pose > 0:
             size += size // self.rand_pose # index >= size means we use random pose.
-        loader = DataLoader(list(range(size)), batch_size=1, collate_fn=self.collate, shuffle=self.training, num_workers=0) 
+        loader = DataLoader(list(range(size)), batch_size=1, 
+                            collate_fn=self.collate, shuffle=self.training, 
+                            num_workers=0) 
         loader._data = self # an ugly fix... we need to access error_map & poses in trainer.
         return loader
 
